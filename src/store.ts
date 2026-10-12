@@ -78,13 +78,14 @@ export class Store {
   }
 
   async add(input: NewItemInput): Promise<Result<Item>> {
-    const title = input.title.trim();
-    if (!title) return { ok: false, error: 'title-required' };
-    if (!Number.isFinite(input.price) || input.price < 0) return { ok: false, error: 'price-invalid' };
+    // Validate in the same top-to-bottom order as the form: ID, title, price.
     const id = input.id ?? this.nextId();
     if (!Number.isInteger(id) || id < 1) return { ok: false, error: 'id-invalid' };
     const existing = this.items.get(id);
     if (existing) return { ok: false, error: existing.deleted ? 'id-deleted' : 'id-exists' };
+    const title = input.title.trim();
+    if (!title) return { ok: false, error: 'title-required' };
+    if (!Number.isFinite(input.price) || input.price < 0) return { ok: false, error: 'price-invalid' };
     const now = Date.now();
     const item: Item = {
       id,
@@ -129,6 +130,26 @@ export class Store {
   async restore(id: number): Promise<void> {
     const cur = this.items.get(id);
     if (cur?.deleted) await this.save([{ ...cur, deleted: false, updatedAt: Date.now() }]);
+  }
+
+  /**
+   * Apply one operation to many items in a single transaction (one undo step, one change).
+   * IDs are never touched: 'delete' only hides, 'sold'/'unsold' only flip the flag.
+   * Returns the IDs that actually changed (use them for undo).
+   */
+  async bulk(ids: number[], op: 'delete' | 'restore' | 'sold' | 'unsold'): Promise<number[]> {
+    const now = Date.now();
+    const changed: Item[] = [];
+    for (const id of new Set(ids)) {
+      const cur = this.items.get(id);
+      if (!cur) continue;
+      if (op === 'delete' && !cur.deleted) changed.push({ ...cur, deleted: true, updatedAt: now });
+      else if (op === 'restore' && cur.deleted) changed.push({ ...cur, deleted: false, updatedAt: now });
+      else if (op === 'sold' && !cur.deleted && !cur.sold) changed.push({ ...cur, sold: true, soldAt: now, updatedAt: now });
+      else if (op === 'unsold' && !cur.deleted && cur.sold) changed.push({ ...cur, sold: false, soldAt: undefined, updatedAt: now });
+    }
+    if (changed.length) await this.save(changed);
+    return changed.map((i) => i.id);
   }
 
   async setSeller(name: string, phone: string): Promise<void> {

@@ -43,6 +43,7 @@ export async function importFlow(store: Store): Promise<boolean> {
   const ids = parsed.items.map((i) => i.id);
   const body = [
     h('p', null, t('imp.summary', { n: parsed.items.length, min: ids.length ? Math.min(...ids) : 0, max: ids.length ? Math.max(...ids) : 0 })),
+    parsed.skippedNoName > 0 && h('p', null, t('imp.noName', { n: parsed.skippedNoName })),
     parsed.mediumFixes > 0 && h('p', null, t('imp.fixed', { n: parsed.mediumFixes })),
     parsed.warnings.length > 0 && h('div', null, h('p', null, t('imp.warnings', { n: parsed.warnings.length })), h('ul', { class: 'warn' }, parsed.warnings.slice(0, 6).map((w) => h('li', null, w)))),
   ];

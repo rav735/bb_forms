@@ -24,6 +24,8 @@ export interface ParsedSheet {
   sellerPhone: string;
   warnings: string[];
   mediumFixes: number;
+  /** Rows that had an item number but no name; they are not imported. */
+  skippedNoName: number;
 }
 
 export interface Meta {

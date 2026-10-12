@@ -135,6 +135,7 @@ export async function parseWorkbook(buf: ArrayBuffer | Uint8Array): Promise<Pars
 
   const warnings: string[] = [];
   let mediumFixes = 0;
+  let skippedNoName = 0;
   let sellerName = '';
   let sellerPhone = '';
   for (const [r, cells] of rows) {
@@ -163,6 +164,12 @@ export async function parseWorkbook(buf: ArrayBuffer | Uint8Array): Promise<Pars
       warnings.push(`row ${r}: invalid item number "${rawId}" – skipped`);
       continue;
     }
+    // Entries without a name are not importable (e.g. pre-numbered but still empty rows).
+    const title = String(cells.get(cTitle) ?? '').trim();
+    if (!title) {
+      skippedNoName++;
+      continue;
+    }
     if (seen.has(id)) {
       warnings.push(`row ${r}: duplicate item number ${id} – skipped`);
       continue;
@@ -176,11 +183,9 @@ export async function parseWorkbook(buf: ArrayBuffer | Uint8Array): Promise<Pars
       warnings.push(`item ${id}: price missing/invalid – set to 0`);
       price = 0;
     }
-    const title = String(cells.get(cTitle) ?? '').trim();
-    if (!title) warnings.push(`item ${id}: title missing`);
     items.push({ id, title, medium: med.value, price });
   }
-  return { items, sellerName, sellerPhone, warnings, mediumFixes };
+  return { items, sellerName, sellerPhone, warnings, mediumFixes, skippedNoName };
 }
 
 // ---------------------------------------------------------------- export

@@ -147,6 +147,7 @@ export class FormView {
       ),
     );
     this.el.appendChild(form);
-    if (isNew) setTimeout(() => title.focus(), 50);
+    // Only grab focus if the user hasn't already moved to another field.
+    if (isNew) setTimeout(() => { if (!this.el.contains(document.activeElement) || document.activeElement === document.body) title.focus(); }, 50);
   }
 }

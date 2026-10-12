@@ -19,7 +19,7 @@ let n = 0;
 const freshStore = () => Store.open(`test-${Date.now()}-${n++}`);
 
 function sheet(ids: number[]): ParsedSheet {
-  return { items: ids.map((id) => ({ id, title: `T${id}`, medium: 'Manga', price: id * 10 })), sellerName: '', sellerPhone: '', warnings: [], mediumFixes: 0 };
+  return { items: ids.map((id) => ({ id, title: `T${id}`, medium: 'Manga', price: id * 10 })), sellerName: '', sellerPhone: '', warnings: [], mediumFixes: 0, skippedNoName: 0 };
 }
 const FILE = { name: 'x.xlsm', buf: new ArrayBuffer(1) };
 
@@ -116,6 +116,8 @@ test('explicit IDs: gap filling works, duplicates and tombstones are rejected', 
   ok(!dead.ok && dead.error === 'id-deleted', 'tombstone rejected');
   const bad = await s.add({ id: 0, title: 'x', medium: '', price: 1 });
   ok(!bad.ok && bad.error === 'id-invalid', 'zero rejected');
+  const both = await s.add({ id: 1, title: '', medium: '', price: NaN });
+  ok(!both.ok && both.error === 'id-exists', 'ID problem is reported before title/price problems');
   const big = await s.add({ id: 50, title: 'big', medium: '', price: 1 });
   ok(big.ok && s.nextId() === 51, 'high explicit id moves the counter');
 });
@@ -166,6 +168,60 @@ test('parser rejects files without the Art. Nr table', async () => {
   let err = '';
   try { await parseWorkbook(await z.generateAsync({ type: 'arraybuffer' })); } catch (e) { err = (e as Error).message; }
   eq(err, 'NO_HEADER');
+});
+
+test('parser skips rows without a name (empty or whitespace-only) and counts them', async () => {
+  const buf = await template([
+    { id: 1, title: 'Real', medium: 'Manga', price: 5 },
+    { id: 2, title: '', medium: 'Manga', price: 7 },
+    { id: 3, title: '   ', medium: 'Figur', price: 9 },
+    { id: 4, title: 'Also real', medium: 'Figur', price: 11 },
+  ]);
+  const p = await parseWorkbook(buf);
+  eq(p.items.map((i) => i.id), [1, 4]);
+  eq(p.skippedNoName, 2);
+});
+
+test('pre-numbered empty rows do not move the ID counter', async () => {
+  const buf = await template([{ id: 1, title: 'A', medium: 'x', price: 1 }, { id: 2, title: '', medium: '', price: 0 }, { id: 3, title: '', medium: '', price: 0 }]);
+  const s = await freshStore();
+  await s.importSheet(await parseWorkbook(buf), { name: 'v.xlsm', buf }, 'replace');
+  eq(s.active().map((i) => i.id), [1]);
+  eq(s.nextId(), 2);
+});
+
+test('bulk delete / restore / sold keep IDs, count as one change, return changed IDs', async () => {
+  const s = await freshStore();
+  await s.importSheet(sheet([1, 2, 3, 4, 5, 6]), FILE, 'replace');
+  await s.update(2, { sold: true });
+  const before = s.meta.changes;
+  const del = await s.bulk([1, 2, 3, 99], 'delete');
+  eq(del, [1, 2, 3], 'unknown id ignored');
+  eq(s.meta.changes, before + 1, 'one change for the whole batch');
+  eq(s.active().map((i) => i.id), [4, 5, 6]);
+  eq(s.nextId(), 7, 'counter untouched');
+  const again = await s.bulk([1, 2], 'delete');
+  eq(again, [], 'already deleted → nothing changed');
+  eq(await s.bulk(del, 'restore'), [1, 2, 3]);
+  ok(s.items.get(2)!.sold, 'sold flag survives delete + restore');
+  eq(await s.bulk([1, 2, 3, 4], 'sold'), [1, 3, 4], 'item 2 was already sold');
+  eq(await s.bulk([1, 3, 4], 'unsold'), [1, 3, 4]);
+  ok(s.items.get(2)!.sold, 'undo of a bulk op does not touch items it did not change');
+  eq(await s.bulk([5], 'delete'), [5]);
+  eq(await s.bulk([5], 'sold'), [], 'deleted items cannot be marked sold');
+  eq(s.nextId(), 7);
+});
+
+test('bulk changes survive a restart', async () => {
+  const name = `bulk-${Date.now()}`;
+  const s1 = await Store.open(name);
+  await s1.importSheet(sheet([1, 2, 3, 4]), FILE, 'replace');
+  await s1.bulk([2, 3], 'delete');
+  await s1.bulk([4], 'sold');
+  s1.close();
+  const s2 = await Store.open(name);
+  eq(s2.active().map((i) => i.id), [1, 4]);
+  ok(s2.items.get(4)!.sold && s2.items.get(2)!.deleted, 'state persisted');
 });
 
 // ----------------------------------------------------------------- export

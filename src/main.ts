@@ -18,7 +18,7 @@ async function start() {
     list.retranslate();
     buildNav();
     settings.render();
-    route();
+    route(true);
   });
 
   const main = h('main', null, list.el, form.el, settings.el);
@@ -37,7 +37,11 @@ async function start() {
     nav.append(mk('#/', t('nav.list'), '☰', 'list'), mk('#/new', t('nav.new'), '+', 'new', 'plus'), mk('#/settings', t('nav.settings'), '⋯', 'settings'));
   }
 
-  function route() {
+  let lastHash: string | null = null;
+  /** Re-route only when the address really changed, so a stray duplicate event can't rebuild a form you are typing in. */
+  function route(force = false) {
+    if (!force && location.hash === lastHash) return;
+    lastHash = location.hash;
     const hash = location.hash.replace(/^#\/?/, '');
     const [seg, arg] = hash.split('/');
     const prev = current;
