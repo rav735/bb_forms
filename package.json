@@ -1,0 +1,21 @@
+{
+  "name": "verkaufsliste",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Offline PWA to manage a sales list (KokoroCon) with stable item IDs and Excel import/export",
+  "type": "module",
+  "scripts": {
+    "build": "tsc --noEmit && node scripts/build.mjs",
+    "serve": "node scripts/serve.mjs",
+    "test": "node tests/run.mjs",
+    "e2e": "node e2e/run.mjs"
+  },
+  "dependencies": {
+    "jszip": "^3.10.1"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2",
+    "typescript": "^6.0.3",
+    "playwright": "^1.56.1"
+  }
+}
