@@ -9,8 +9,8 @@ Offline-first PWA to manage a sales list (e.g. for a convention) on an Android p
 
 ## Use it
 1. Open the published page in Chrome on Android → menu → **Install app** / *Add to Home screen*.
-2. **Mehr → Excel-Datei wählen** to import your sheet.
-3. Export from **Mehr → Export** (share sheet or save to the phone). Export regularly: clearing Chrome's site data or uninstalling the app deletes the list.
+2. **☰ → Einstellungen → Excel-Datei wählen** to import your sheet.
+3. Export from **☰ → Einstellungen → Export** (share sheet or save to the phone). Export regularly: clearing Chrome's site data or uninstalling the app deletes the list.
 
 ## Develop
 ```bash

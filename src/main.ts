@@ -1,7 +1,8 @@
 import { requestPersistence } from './actions';
 import { clear, h, hideToast } from './dom';
+import { Drawer } from './drawer';
 import { FormView } from './form';
-import { initLang, t } from './i18n';
+import { initLang } from './i18n';
 import { ListView } from './list';
 import { noteNavigation } from './nav';
 import { SettingsView } from './settings';
@@ -12,30 +13,24 @@ async function start() {
   const store = await Store.open();
   if (store.items.size > 0) void requestPersistence();
 
-  const list = new ListView(store);
+  let drawer: Drawer;
+  const list = new ListView(store, () => drawer.open());
+  drawer = new Drawer(store);
   const form = new FormView(store);
   const settings = new SettingsView(store, () => {
     list.retranslate();
-    buildNav();
+    drawer.retranslate();
     settings.render();
     route(true);
   });
 
   const main = h('main', null, list.el, form.el, settings.el);
-  const nav = h('nav', { class: 'bottom' });
   const root = document.getElementById('app')!;
   clear(root);
-  root.append(main, nav);
+  root.append(main);
 
   const listScroll = { y: 0 };
   let current = '';
-
-  function buildNav() {
-    clear(nav);
-    const mk = (href: string, label: string, icon: string, key: string, cls = '') =>
-      h('a', { href, class: `navitem ${cls} ${current === key ? 'on' : ''}`, 'aria-current': current === key ? 'page' : null }, h('span', { class: 'ico' }, icon), h('span', null, label));
-    nav.append(mk('#/', t('nav.list'), '☰', 'list'), mk('#/new', t('nav.new'), '+', 'new', 'plus'), mk('#/settings', t('nav.settings'), '⋯', 'settings'));
-  }
 
   let lastHash: string | null = null;
   /** Re-route only when the address really changed, so a stray duplicate event can't rebuild a form you are typing in. */
@@ -63,7 +58,7 @@ async function start() {
       current = 'list';
     }
     document.body.dataset.view = current;
-    buildNav();
+    drawer.setCurrent(current);
     window.scrollTo(0, current === 'list' ? listScroll.y : 0);
   }
 

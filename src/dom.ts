@@ -21,6 +21,22 @@ export function append(el: Node, children: Child[]) {
   }
 }
 
+const ICONS: Record<string, string> = {
+  menu: '<path d="M4 6h16M4 12h16M4 18h16"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  list: '<path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1"/><circle cx="4.5" cy="12" r="1"/><circle cx="4.5" cy="18" r="1"/>',
+  sliders: '<path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/>',
+};
+
+/** Small inline SVG icon (static strings only). */
+export function icon(name: keyof typeof ICONS): SVGSVGElement {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('aria-hidden', 'true');
+  svg.innerHTML = ICONS[name];
+  return svg;
+}
+
 export function clear(el: Element) {
   while (el.firstChild) el.removeChild(el.firstChild);
 }
@@ -57,6 +73,8 @@ export interface DialogButton {
   label: string;
   hint?: string;
   kind?: 'primary' | 'danger' | 'plain';
+  /** Highlights the currently chosen option. */
+  active?: boolean;
   value: string;
 }
 
@@ -81,7 +99,7 @@ export function modal(title: string, body: Child[], buttons: DialogButton[]): Pr
           buttons.map((b) =>
             h(
               'button',
-              { class: `btn ${b.kind ?? 'plain'}`, onclick: () => close(b.value) },
+              { class: `btn ${b.kind ?? 'plain'} ${b.active ? 'on' : ''}`, onclick: () => close(b.value) },
               h('span', null, b.label),
               b.hint && h('small', null, b.hint),
             ),

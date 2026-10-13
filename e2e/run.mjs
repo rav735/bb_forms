@@ -87,6 +87,19 @@ check(await rows().count() === 154, 'list shows 154 rows after import');
 const all = await ids();
 check(all[0] === 1 && all[153] === 154 && all.every((v, i) => v === i + 1), 'IDs are exactly 1..154 in order');
 await page.screenshot({ path: `${OUT}/03-list.png` });
+{
+  const m = await page.evaluate(() => {
+    const r = (sel) => { const e = document.querySelector(sel); if (!e) return null; const b = e.getBoundingClientRect(); return { x: b.x, w: b.width, h: b.height }; };
+    const segs = (sel) => [...document.querySelectorAll(sel + ' > button')].map((b) => Math.round(b.getBoundingClientRect().width));
+    return { vw: innerWidth, status: r('.seg.status'), medium: r('.seg.medium'), sBtns: segs('.seg.status'), mBtns: segs('.seg.medium'), idb: r('li.row .idb'), row: r('li.row'), nav: document.querySelectorAll('nav.bottom').length, burger: !!document.querySelector('.burger') };
+  });
+  const fill = (b) => b && b.w >= m.vw - 32 && b.x <= 16;
+  check(fill(m.status) && fill(m.medium), `status and medium bars span the screen width (${Math.round(m.status.w)} / ${Math.round(m.medium.w)} of ${m.vw}px)`);
+  check(m.sBtns.length === 3 && Math.max(...m.sBtns) - Math.min(...m.sBtns) <= 1, `status bar has 3 equal sections ${m.sBtns}`);
+  check(m.mBtns.length === 4 && Math.max(...m.mBtns) - Math.min(...m.mBtns) <= 1, `medium bar has 4 equal sections ${m.mBtns}`);
+  check(m.idb.w <= 44 && m.row.h <= 64, `compact rows: ID badge ${Math.round(m.idb.w)}px wide, row ${Math.round(m.row.h)}px high`);
+  check(m.nav === 0 && m.burger, 'no bottom navigation bar; burger button present');
+}
 
 // ---- search / jump / filters
 await page.fill('.search', '87');
@@ -96,10 +109,19 @@ const dragon = await rows().count();
 check(dragon >= 1, `text search "dragon" finds ${dragon}`);
 await page.screenshot({ path: `${OUT}/04-search.png` });
 await page.fill('.search', '');
-await page.click('.chips >> nth=1 >> text=Funko Pop');
+await page.click('.seg.medium button:has-text("Funko Pop")');
 check(await rows().count() === 37, 'medium chip Funko Pop → 37 rows');
-await page.click('.chips >> nth=1 >> text=Alle Medien');
-check(await page.locator('.chips .chip', { hasText: /^Manga`/ }).count() === 0, 'no "Manga`" medium chip any more');
+await page.click('.seg.medium button >> nth=0');
+await page.click('.seg.medium .more');
+await page.waitForSelector('.modal');
+const pickerText = await page.locator('.modal').innerText();
+check(!pickerText.includes('`') && /Figur/.test(pickerText), 'medium picker lists the remaining media and no "Manga`"');
+await page.screenshot({ path: `${OUT}/03b-medium-picker.png` });
+await page.click('.modal .btn:has-text("Figur")');
+await until(async () => (await rows().count()) === 4);
+check((await rows().count()) === 4 && (await page.locator('.seg.medium .more.on .lbl').innerText()) === 'Figur', 'picking "Figur" in the picker filters to its 4 items and shows the name in the bar');
+await page.click('.seg.medium button >> nth=0');
+await until(async () => (await rows().count()) === 154);
 
 // ---- mark sold from list
 await page.fill('.search', '5');
@@ -113,8 +135,25 @@ await until(async () => (await page.locator('li.row[data-id="5"].sold').count())
 await page.fill('.search', '');
 
 // ---- add new item → 155
-await page.click('nav.bottom a.plus');
+// burger menu: open, back button closes it, overlay closes it, items navigate
+await page.click('.burger');
+await page.waitForSelector('.drawer-overlay.open .drawer-item');
+await page.waitForTimeout(400);
+await page.screenshot({ path: `${OUT}/03c-drawer.png` });
+check((await page.locator('.drawer-item').allInnerTexts()).join('|') === 'Liste|Neuer Artikel|Einstellungen', 'drawer lists Liste / Neuer Artikel / Einstellungen');
+await page.goBack();
+await until(async () => await page.locator('.drawer-overlay').isHidden());
+check(await page.locator('.drawer-overlay').isHidden() && (await rows().count()) === 154, 'Android back closes the menu and stays on the list');
+await page.click('.burger');
+await page.waitForSelector('.drawer-overlay.open');
+await page.mouse.click(370, 400);
+await until(async () => await page.locator('.drawer-overlay').isHidden());
+check(await page.locator('.drawer-overlay').isHidden(), 'tapping outside closes the menu');
+await page.click('.burger');
+await page.waitForSelector('.drawer-overlay.open');
+await page.click('.drawer-item:has-text("Neuer Artikel")');
 await page.waitForSelector('.form');
+check(await until(async () => await page.locator('.drawer-overlay').isHidden()), 'menu item opens the form and closes the menu');
 check((await page.inputValue('#f-id')) === '155', 'new item suggests id 155');
 await page.screenshot({ path: `${OUT}/06-form-new.png` });
 await page.fill('#f-title', 'Testartikel Eins');
@@ -135,7 +174,7 @@ await page.click('.btn.danger-outline');
 await page.click('.modal .btn.danger');
 await listReady();
 check(await rows().count() === 154, 'deleted item disappears from list');
-await page.click('nav.bottom a.plus');
+await page.click('.add-btn');
 await page.waitForSelector('.form');
 check((await page.inputValue('#f-id')) === '156', 'after deleting 155 the next new ID is 156 (never reused)');
 await page.fill('#f-title', 'Testartikel Zwei');
@@ -163,7 +202,7 @@ check((await page.locator('li.row[data-id="10"] .title').innerText()) === 'Geän
 // ---- bulk select / delete / sold
 const selCount = () => page.locator('.selcount').innerText();
 await page.click('.select-btn');
-check(await page.locator('.selbar').isVisible() && !(await page.locator('nav.bottom').isVisible()), 'selection mode shows action bar and hides the bottom nav');
+check(await page.locator('.selbar').isVisible() && await page.locator('.titlebar').isHidden(), 'selection mode shows the action bar and replaces the title bar');
 check(/Nichts ausgewählt/.test(await selCount()) && await page.locator('.selbar .btn.danger').isDisabled(), 'nothing selected → actions disabled');
 for (const id of [20, 21, 22]) await page.locator(`li.row[data-id="${id}"] .title`).click();
 check(/3 ausgewählt/.test(await selCount()), 'tapping rows selects them (3 selected)');
@@ -178,7 +217,7 @@ await page.screenshot({ path: `${OUT}/10-bulk-confirm.png` });
 await page.click('.modal .btn.danger');
 await until(async () => (await rows().count()) === 152);
 check(await rows().count() === 152, 'bulk delete removed 3 rows (155 → 152)');
-check(await page.locator('.selbar').isHidden() && await page.locator('nav.bottom').isVisible(), 'selection mode closed after the action');
+check(await page.locator('.selbar').isHidden() && await page.locator('.titlebar').isVisible(), 'selection mode closed after the action');
 await page.click('#toast .toast-action'); // undo
 await until(async () => (await rows().count()) === 155);
 check(await rows().count() === 155 && (await page.locator('li.row[data-id="21"]').count()) === 1, 'undo restores all 3 with the same IDs');
@@ -196,11 +235,11 @@ check((await selCount()).includes('155'), 'Alle selects every visible item (155)
 await page.click('.seltop .chip:has-text("Keine")');
 check(/Nichts/.test(await selCount()), 'Keine clears the selection');
 // selection only covers visible rows: filter to sold-only, select all
-await page.click('.chips .chip:has-text("Verkauft")');
+await page.click('.seg.status button:has-text("Verkauft")');
 await page.click('.seltop .chip:has-text("Alle")');
 const soldVisible = await rows().count();
 check((await selCount()).includes(String(soldVisible)), `select-all under a filter only selects the ${soldVisible} visible rows`);
-await page.click('.chips .chip:has-text("Alle") >> nth=0');
+await page.click('.seg.status button:has-text("Alle")');
 check(await page.locator('.selbar').isVisible(), 'still in selection mode after changing the filter');
 // Android back button leaves selection mode first
 await page.goBack();
@@ -224,7 +263,8 @@ check(await rows().count() === 153, 'items 40 and 41 deleted (155 → 153)');
 await page.screenshot({ path: `${OUT}/11-after-bulk.png` });
 
 // ---- settings: seller, export
-await page.click('nav.bottom a:has-text("Mehr")');
+await page.click('.burger');
+await page.click('.drawer-item:has-text("Einstellungen")');
 await page.waitForSelector('.cards');
 await page.fill('.settings-view input[type=text]', 'Max Mustermann');
 await page.fill('.settings-view input[type=tel]', '+43 660 1234567');
@@ -264,6 +304,34 @@ await page.reload();
 await page.waitForSelector('li.row', { timeout: 10000 });
 check(true, 'app loads while offline (service worker cache)');
 await ctx.setOffline(false);
+
+// ---- contrast of the pastel palette (WCAG AA 4.5:1 for text pairs) in light and dark
+const contrast = async (scheme) => {
+  await page.emulateMedia({ colorScheme: scheme });
+  return page.evaluate(() => {
+    const cs = getComputedStyle(document.documentElement);
+    const v = (n) => cs.getPropertyValue(n).trim();
+    const lum = (hex) => { const h = hex.replace('#', ''); const [r, g, b] = [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16) / 255).map((c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4)); return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
+    const cr = (a, b) => { const [x, y] = [lum(v(a)), lum(v(b))].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); };
+    const pairs = [['--ink', '--surface'], ['--ink', '--bg'], ['--muted', '--bg'], ['--muted', '--surface'], ['--muted', '--accent-soft'], ['--accent-ink', '--accent'], ['--accent-strong', '--accent-soft'], ['--accent-strong', '--surface'], ['--ok-ink', '--ok'], ['--ok-strong', '--ok-soft'], ['--ok-strong', '--surface'], ['--danger-ink', '--danger'], ['--danger-strong', '--surface'], ['--ink', '--warn-soft']];
+    return pairs.map(([a, b]) => [`${a} on ${b}`, cr(a, b)]).filter(([, r]) => r < 4.5);
+  });
+};
+for (const scheme of ['light', 'dark']) {
+  const bad = await contrast(scheme);
+  check(bad.length === 0, `${scheme} palette: all text pairs ≥ 4.5:1${bad.length ? ' – failing: ' + JSON.stringify(bad) : ''}`);
+}
+// dark-mode screenshots
+await page.emulateMedia({ colorScheme: 'dark' });
+await page.goto(url + '#/');
+await page.waitForSelector('li.row');
+await page.screenshot({ path: `${OUT}/12-dark-list.png` });
+await page.click('.burger');
+await page.waitForSelector('.drawer-overlay.open .drawer-item');
+await page.waitForTimeout(300);
+await page.screenshot({ path: `${OUT}/13-dark-drawer.png` });
+await page.goBack();
+await page.emulateMedia({ colorScheme: 'light' });
 
 // ---- manifest sanity
 const manifest = await (await ctx.request.get(url + 'manifest.webmanifest')).json();

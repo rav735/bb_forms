@@ -1,5 +1,5 @@
 import { importFlow } from './actions';
-import { clear, fold, h, modal, toast } from './dom';
+import { clear, fold, h, icon, modal, toast } from './dom';
 import { fmtPrice, t } from './i18n';
 import type { Store } from './store';
 import type { Item } from './types';
@@ -16,6 +16,8 @@ export class ListView {
   private medium = '';
   private search: HTMLInputElement;
   private title = h('h1', null, t('app.title'));
+  private burger = h('button', { class: 'icon-btn burger', type: 'button', 'aria-label': t('menu.open'), onclick: () => this.onMenu() }, icon('menu'));
+  private addBtn = h('a', { class: 'icon-btn accent add-btn', href: '#/new', 'aria-label': t('nav.new') }, icon('plus'));
   private selectBtn = h('button', { class: 'chip select-btn', type: 'button', onclick: () => this.enterSelection() }, t('list.select'));
   private titlebar = h('div', { class: 'titlebar' });
   private selTop = h('div', { class: 'seltop', hidden: true });
@@ -34,7 +36,7 @@ export class ListView {
   private pressStart = { x: 0, y: 0 };
   private suppressClick = false;
 
-  constructor(private store: Store) {
+  constructor(private store: Store, private onMenu: () => void) {
     this.search = h('input', {
       type: 'search',
       class: 'search',
@@ -48,7 +50,7 @@ export class ListView {
         this.renderItems();
       },
     });
-    this.titlebar.append(this.title, this.selectBtn);
+    this.titlebar.append(this.burger, this.title, this.selectBtn, this.addBtn);
 
     this.ul.addEventListener('click', (e) => this.onClick(e));
     this.ul.addEventListener('pointerdown', (e) => this.onPointerDown(e));
@@ -77,6 +79,8 @@ export class ListView {
   retranslate() {
     this.title.textContent = t('app.title');
     this.selectBtn.textContent = t('list.select');
+    this.burger.setAttribute('aria-label', t('menu.open'));
+    this.addBtn.setAttribute('aria-label', t('nav.new'));
     this.search.placeholder = t('list.search');
     this.render();
   }
@@ -200,20 +204,49 @@ export class ListView {
     this.stats.textContent = all.length ? t('list.stats', { n: all.length, a: all.length - sold.length, s: sold.length, sum: fmtPrice(sum) }) : '';
     this.selectBtn.hidden = all.length === 0;
 
+    // status: one full-width bar, three equal sections
     clear(this.chips);
+    this.chips.className = 'seg status';
+    this.chips.setAttribute('role', 'group');
     const st: [StatusFilter, string][] = [['all', t('list.all')], ['available', t('list.available')], ['sold', t('list.sold')]];
     for (const [k, label] of st) {
-      this.chips.appendChild(h('button', { class: `chip ${this.status === k ? 'on' : ''}`, 'aria-pressed': String(this.status === k), onclick: () => { this.status = k; this.render(); } }, label));
+      this.chips.appendChild(
+        h('button', { type: 'button', class: this.status === k ? 'on' : '', 'aria-pressed': String(this.status === k), onclick: () => { this.status = k; this.render(); } }, h('span', { class: 'lbl' }, label)),
+      );
     }
+
+    // medium: same bar style; "All" + the two biggest media + a "More" section opening a picker
     clear(this.mediumChips);
+    this.mediumChips.className = 'seg medium';
+    this.mediumChips.setAttribute('role', 'group');
     const counts = new Map<string, number>();
     for (const i of all) if (i.medium) counts.set(i.medium, (counts.get(i.medium) ?? 0) + 1);
-    if (counts.size > 1) {
-      if (this.medium && !counts.has(this.medium)) this.medium = '';
-      const mk = (value: string, label: string) =>
-        h('button', { class: `chip alt ${this.medium === value ? 'on' : ''}`, 'aria-pressed': String(this.medium === value), onclick: () => { this.medium = value; this.render(); } }, label);
-      this.mediumChips.appendChild(mk('', t('list.allMediums')));
-      for (const m of this.store.mediums()) this.mediumChips.appendChild(mk(m, `${m} ${counts.get(m)}`));
+    const mediums = this.store.mediums();
+    if (this.medium && !counts.has(this.medium)) this.medium = '';
+    this.mediumChips.hidden = mediums.length < 2;
+    if (mediums.length >= 2) {
+      const direct = mediums.length <= 3 ? mediums : mediums.slice(0, 2);
+      const overflow = mediums.length <= 3 ? [] : mediums.slice(2);
+      const mk = (value: string, label: string, count?: number) =>
+        h(
+          'button',
+          { type: 'button', class: this.medium === value ? 'on' : '', 'aria-pressed': String(this.medium === value), onclick: () => { this.medium = value; this.render(); } },
+          h('span', { class: 'lbl' }, label),
+          count !== undefined && h('span', { class: 'cnt' }, String(count)),
+        );
+      this.mediumChips.appendChild(mk('', t('list.all'), all.length));
+      for (const m of direct) this.mediumChips.appendChild(mk(m, m, counts.get(m)));
+      if (overflow.length) {
+        const chosen = overflow.includes(this.medium) ? this.medium : '';
+        this.mediumChips.appendChild(
+          h(
+            'button',
+            { type: 'button', class: `more ${chosen ? 'on' : ''}`, 'aria-pressed': String(!!chosen), 'aria-haspopup': 'dialog', onclick: () => void this.pickMedium(mediums, counts) },
+            h('span', { class: 'lbl' }, chosen || t('list.moreMediums')),
+            h('span', { class: 'cnt' }, chosen ? `${counts.get(chosen)} ▾` : '▾'),
+          ),
+        );
+      }
     }
 
     clear(this.banner);
@@ -227,6 +260,18 @@ export class ListView {
           h('a', { href: '#/settings', class: 'banner-link' }, t('list.export')),
         ),
       );
+    }
+  }
+
+  private async pickMedium(mediums: string[], counts: Map<string, number>) {
+    const r = await modal(t('list.pickMedium'), [], [
+      { label: t('list.allMediums'), value: 'm:', active: this.medium === '' },
+      ...mediums.map((m) => ({ label: `${m}  ·  ${counts.get(m) ?? 0}`, value: `m:${m}`, active: this.medium === m })),
+      { label: t('common.cancel'), value: 'cancel' },
+    ]);
+    if (r.startsWith('m:')) {
+      this.medium = r.slice(2);
+      this.render();
     }
   }
 
